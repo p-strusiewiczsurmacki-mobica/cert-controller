@@ -111,6 +111,7 @@ func (w WebhookInfo) gvk() schema.GroupVersionKind {
 
 // AddRotator adds the CertRotator and ReconcileWH to the manager.
 func AddRotator(mgr manager.Manager, cr *CertRotator) error {
+	crLog.Info("AddRotator()")
 	if mgr == nil || cr == nil {
 		return fmt.Errorf("nil arguments")
 	}
@@ -118,12 +119,14 @@ func AddRotator(mgr manager.Manager, cr *CertRotator) error {
 	if ns == "" {
 		return fmt.Errorf("invalid namespace for secret")
 	}
+	crLog.Info("addNamespacedCache()")
 	cache, err := addNamespacedCache(mgr, cr, ns)
 	if err != nil {
 		return fmt.Errorf("creating namespaced cache: %w", err)
 	}
 
 	cr.reader = cache
+	crLog.Info("GetClient()")
 	cr.writer = mgr.GetClient() // TODO make overrideable
 	cr.certsMounted = make(chan struct{})
 	cr.certsNotMounted = make(chan struct{})
@@ -177,6 +180,7 @@ func AddRotator(mgr manager.Manager, cr *CertRotator) error {
 		refreshCertIfNeededDelegate: cr.refreshCertIfNeeded,
 		fieldOwner:                  cr.FieldOwner,
 	}
+	crLog.Info("addController()")
 	if err := addController(mgr, reconciler, cr.controllerName); err != nil {
 		return err
 	}
@@ -706,6 +710,7 @@ func addController(mgr manager.Manager, r *ReconcileWH, controllerName string) e
 		return err
 	}
 
+	crLog.Info("addController - secret watch")
 	err = c.Watch(
 		source.Kind(r.cache, &corev1.Secret{}, &handler.TypedEnqueueRequestForObject[*corev1.Secret]{}),
 	)
@@ -714,6 +719,7 @@ func addController(mgr manager.Manager, r *ReconcileWH, controllerName string) e
 	}
 
 	for _, webhook := range r.webhooks {
+		crLog.Info("addController - unstructuored watch", "webhook", webhook.Name)
 		wh := &unstructured.Unstructured{}
 		wh.SetGroupVersionKind(webhook.gvk())
 		err = c.Watch(
@@ -725,6 +731,7 @@ func addController(mgr manager.Manager, r *ReconcileWH, controllerName string) e
 		}
 	}
 
+	crLog.Info("mgr.Add()")
 	return mgr.Add(controllerWrapper{c, r.needLeaderElection})
 }
 
@@ -748,15 +755,18 @@ type ReconcileWH struct {
 // Reconcile reads that state of the cluster for a validatingwebhookconfiguration
 // object and makes sure the most recent CA cert is included.
 func (r *ReconcileWH) Reconcile(ctx context.Context, request reconcile.Request) (reconcile.Result, error) {
+	crLog.Info("Reconcile()", "request", request)
 	if request.NamespacedName != r.secretKey {
 		return reconcile.Result{}, nil
 	}
 
+	crLog.Info("Reconcile() =- waiting for caech sync")
 	if !r.cache.WaitForCacheSync(ctx) {
 		return reconcile.Result{}, errors.New("cache not ready")
 	}
 
 	secret := &corev1.Secret{}
+	crLog.Info("Reconcile() - getting secret", "secret", request.NamespacedName)
 	if err := r.cache.Get(r.ctx, request.NamespacedName, secret); err != nil {
 		if k8sErrors.IsNotFound(err) {
 			// Object not found, return.  Created objects are automatically garbage collected.
@@ -768,7 +778,9 @@ func (r *ReconcileWH) Reconcile(ctx context.Context, request reconcile.Request) 
 	}
 
 	if secret.GetDeletionTimestamp().IsZero() {
+		crLog.Info("Reconcile() - deletion timestamp is 0")
 		if r.refreshCertIfNeededDelegate != nil {
+			crLog.Info("Reconcile() - refreshCertIfNeededDelegate0")
 			rotatedCA, err := r.refreshCertIfNeededDelegate()
 			if err != nil {
 				crLog.Error(err, "error rotating certs on secret reconcile")
@@ -777,10 +789,12 @@ func (r *ReconcileWH) Reconcile(ctx context.Context, request reconcile.Request) 
 
 			// if we did rotate the CA, the secret is stale so let's return
 			if rotatedCA {
+				crLog.Info("Reconcile() - rotated CA")
 				return reconcile.Result{}, nil
 			}
 		}
 
+		crLog.Info("Reconcile() - buildArtifactsFromSecret()")
 		artifacts, err := buildArtifactsFromSecret(secret)
 		if err != nil {
 			crLog.Error(err, "secret is not well-formed, cannot update webhook configurations")
@@ -788,11 +802,13 @@ func (r *ReconcileWH) Reconcile(ctx context.Context, request reconcile.Request) 
 		}
 
 		// Ensure certs on webhooks
+		crLog.Info("Reconcile() - ensureCerts()")
 		if err := r.ensureCerts(artifacts.CertPEM); err != nil {
 			return reconcile.Result{}, err
 		}
 
 		// Set CAInjected if the reconciler has not exited early.
+		crLog.Info("Reconcile() - wasCAInjected.Store()")
 		r.wasCAInjected.Store(true)
 	}
 
