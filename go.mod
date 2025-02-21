@@ -1,4 +1,4 @@
-module github.com/open-policy-agent/cert-controller
+module github.com/p-strusiewiczsurmacki/cert-controller
 
 go 1.22.0
 
