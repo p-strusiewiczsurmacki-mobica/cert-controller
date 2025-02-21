@@ -1,4 +1,4 @@
-module github.com/p-strusiewiczsurmacki/cert-controller
+module github.com/p-strusiewiczsurmacki-mobica/cert-controller
 
 go 1.22.0
 
