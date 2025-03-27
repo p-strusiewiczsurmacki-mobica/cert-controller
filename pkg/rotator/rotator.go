@@ -765,11 +765,14 @@ func (r *ReconcileWH) Reconcile(ctx context.Context, request reconcile.Request) 
 	if r.enableReadinessCheck {
 		select {
 		case <-r.certsMounted:
+			crLog.Info("CERTS MOUNTED - RUNNING RECONCILIATION")
 			// Continue with reconciliation
 		case <-ctx.Done():
+			crLog.Info("CONTEXT DONE")
 			// controller-runtime will requeue with backoff strategy when this error is returned
 			return reconcile.Result{}, fmt.Errorf("context done, retrying reconciliation: %w", ctx.Err())
 		case <-r.certsNotMounted:
+			crLog.Info("CERTS NOT MOUNTED")
 			// controller-runtime will requeue with backoff strategy when this error is returned
 			return reconcile.Result{}, errors.New("certs not mounted, retrying reconciliation")
 		}
